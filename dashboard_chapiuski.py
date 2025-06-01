@@ -153,6 +153,144 @@ def analisar_momento(df, jogador, coluna):
     
     return fig
 
+def criar_radar(df, jogadores):
+    metricas = []
+    total_semanas = df['Semana'].nunique()
+    
+    for jogador in jogadores:
+        dados_jogador = df[df['Jogador'] == jogador]
+        jogos = len(dados_jogador)
+        if jogos > 0:
+            semanas_jogadas = dados_jogador['Semana'].nunique()
+            vitorias = (dados_jogador['Situação'] == 'Vitória').sum()
+            taxa_vitoria = (vitorias / jogos * 100)
+            
+            metricas.append({
+                'Jogador': jogador,
+                'Gols/Jogo': dados_jogador['Gol'].mean(),
+                'Assistências/Jogo': dados_jogador['Assistência'].mean(),
+                'Frequência (%)': (semanas_jogadas / total_semanas * 100),
+                'Taxa de Vitória (%)': taxa_vitoria,
+                'Participações/Jogo': (dados_jogador['Gol'].sum() + dados_jogador['Assistência'].sum()) / jogos
+            })
+    
+    if not metricas:
+        return go.Figure()
+    
+    df_metricas = pd.DataFrame(metricas)
+    
+    fig = go.Figure()
+    
+    categorias = ['Gols/Jogo', 'Assistências/Jogo', 'Frequência (%)', 'Taxa de Vitória (%)', 'Participações/Jogo']
+    
+    for jogador in df_metricas['Jogador']:
+        valores = df_metricas[df_metricas['Jogador'] == jogador][categorias].values[0]
+        valores = np.append(valores, valores[0])  # Fecha o polígono
+        
+        fig.add_trace(go.Scatterpolar(
+            r=valores,
+            theta=categorias + [categorias[0]],
+            name=jogador,
+            fill='toself'
+        ))
+    
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, max([
+                    df_metricas['Gols/Jogo'].max(),
+                    df_metricas['Assistências/Jogo'].max(),
+                    df_metricas['Frequência (%)'].max() / 100,
+                    df_metricas['Taxa de Vitória (%)'].max() / 100,
+                    df_metricas['Participações/Jogo'].max()
+                ])]
+            )
+        ),
+        title='Comparação entre Jogadores',
+        showlegend=True
+    )
+    
+    return fig
+
+def criar_rede_entrosamento(df, coluna, titulo):
+    top_7_frequentes = df['Jogador'].value_counts().head(7).index.tolist()
+    
+    soma = Counter()
+    semanas = Counter()
+    for semana, grupo in df.groupby('Semana'):
+        jogs = grupo['Jogador'].unique()
+        for par in combinations(sorted(jogs), 2):
+            if par[0] in top_7_frequentes and par[1] in top_7_frequentes:
+                soma[par] += grupo[grupo['Jogador'].isin(par)][coluna].sum()
+                semanas[par] += 1
+    
+    media_dict = {par: soma[par]/semanas[par] if semanas[par]>0 else 0 for par in soma}
+    
+    nodes = list(set([j for par in media_dict.keys() for j in par]))
+    node_indices = {node: i for i, node in enumerate(nodes)}
+    
+    edge_x = []
+    edge_y = []
+    edge_weights = []
+    
+    for (j1, j2), peso in media_dict.items():
+        if peso > 0:
+            x0 = np.cos(2*np.pi*node_indices[j1]/len(nodes))
+            y0 = np.sin(2*np.pi*node_indices[j1]/len(nodes))
+            x1 = np.cos(2*np.pi*node_indices[j2]/len(nodes))
+            y1 = np.sin(2*np.pi*node_indices[j2]/len(nodes))
+            
+            edge_x.extend([x0, x1, None])
+            edge_y.extend([y0, y1, None])
+            edge_weights.append(peso)
+    
+    edges_trace = go.Scatter(
+        x=edge_x, y=edge_y,
+        line=dict(width=np.array(edge_weights)*2, color='#888'),
+        hoverinfo='none',
+        mode='lines'
+    )
+    
+    node_x = [np.cos(2*np.pi*i/len(nodes)) for i in range(len(nodes))]
+    node_y = [np.sin(2*np.pi*i/len(nodes)) for i in range(len(nodes))]
+    
+    nodes_trace = go.Scatter(
+        x=node_x, y=node_y,
+        mode='markers+text',
+        hoverinfo='text',
+        text=nodes,
+        textposition="top center",
+        marker=dict(
+            size=20,
+            color='#1f77b4',
+            line_width=2
+        )
+    )
+    
+    fig = go.Figure(data=[edges_trace, nodes_trace],
+                   layout=go.Layout(
+                       title=titulo,
+                       showlegend=False,
+                       hovermode='closest',
+                       margin=dict(b=20,l=5,r=5,t=40),
+                       xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                       yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)
+                   ))
+    
+    return fig
+
+def analisar_tendencia(df, jogador, coluna):
+    ultimos_4 = df[df['Jogador'] == jogador][coluna].tail(4).mean()
+    media_geral = df[df['Jogador'] == jogador][coluna].mean()
+    
+    if media_geral == 0:
+        return "❌ Sem dados suficientes", 0
+    else:
+        momento = "🔥 Em Alta" if ultimos_4 > media_geral * 1.2 else "❄️ Em Baixa" if ultimos_4 < media_geral * 0.8 else "➡️ Estável"
+        diferenca = ((ultimos_4/media_geral - 1)*100) if media_geral > 0 else 0
+        return momento, diferenca
+
 # Layout do Dashboard
 app.layout = dbc.Container([
     html.H1('Chapiuski FC', className='text-center my-4'),
@@ -245,6 +383,37 @@ app.layout = dbc.Container([
         ])
     ], className='mb-4'),
     
+    # Comparação entre Jogadores
+    dbc.Card([
+        dbc.CardBody([
+            html.H3('📊 Comparação entre Jogadores', className='card-title'),
+            dcc.Dropdown(
+                id='jogadores-comparacao',
+                multi=True,
+                placeholder='Selecione os jogadores para comparar (máximo 5)',
+                style={'marginBottom': '20px'}
+            ),
+            dcc.Graph(id='radar-plot')
+        ])
+    ], className='mb-4'),
+    
+    # Redes de Entrosamento
+    dbc.Card([
+        dbc.CardBody([
+            html.H3('🤝 Redes de Entrosamento', className='card-title'),
+            dbc.Row([
+                dbc.Col([
+                    html.H5('⚽ Rede de Gols', className='text-center'),
+                    dcc.Graph(id='rede-gols')
+                ]),
+                dbc.Col([
+                    html.H5('👟 Rede de Assistências', className='text-center'),
+                    dcc.Graph(id='rede-assists')
+                ])
+            ])
+        ])
+    ], className='mb-4'),
+    
     # Análise Individual
     dbc.Card([
         dbc.CardBody([
@@ -270,11 +439,15 @@ app.layout = dbc.Container([
      Output('evolucao-gols', 'figure'),
      Output('evolucao-assists', 'figure'),
      Output('heatmap-participacao', 'figure'),
-     Output('jogador-select', 'options')],
+     Output('jogadores-comparacao', 'options'),
+     Output('radar-plot', 'figure'),
+     Output('rede-gols', 'figure'),
+     Output('rede-assists', 'figure')],
     [Input('data-inicio', 'date'),
-     Input('data-fim', 'date')]
+     Input('data-fim', 'date'),
+     Input('jogadores-comparacao', 'value')]
 )
-def update_dashboard(data_inicio, data_fim):
+def update_dashboard(data_inicio, data_fim, jogadores_selecionados):
     df = carregar_dados()
     if df is None:
         return dash.no_update
@@ -316,6 +489,13 @@ def update_dashboard(data_inicio, data_fim):
     
     jogadores_options = [{'label': j, 'value': j} for j in sorted(df_filt['Jogador'].unique())]
     
+    # Radar Plot
+    radar_fig = criar_radar(df_filt, jogadores_selecionados if jogadores_selecionados else [])
+    
+    # Redes de Entrosamento
+    rede_gols = criar_rede_entrosamento(df_filt, 'Gol', 'Rede de Entrosamento - Gols')
+    rede_assists = criar_rede_entrosamento(df_filt, 'Assistência', 'Rede de Entrosamento - Assistências')
+    
     return (
         total_jogos,
         total_gols,
@@ -325,7 +505,10 @@ def update_dashboard(data_inicio, data_fim):
         evolucao_gols,
         evolucao_assists,
         heatmap,
-        jogadores_options
+        jogadores_options,
+        radar_fig,
+        rede_gols,
+        rede_assists
     )
 
 @app.callback(
@@ -359,6 +542,10 @@ def update_analise_individual(jogador, data_inicio, data_fim):
     assists = dados_jogador['Assistência'].sum()
     vitorias = (dados_jogador['Situação'] == 'Vitória').sum()
     
+    # Análise de tendência
+    momento_gols, diferenca_gols = analisar_tendencia(df_filt, jogador, 'Gol')
+    momento_assists, diferenca_assists = analisar_tendencia(df_filt, jogador, 'Assistência')
+    
     metricas = dbc.Row([
         dbc.Col(dbc.Card([
             dbc.CardBody([
@@ -369,13 +556,13 @@ def update_analise_individual(jogador, data_inicio, data_fim):
         dbc.Col(dbc.Card([
             dbc.CardBody([
                 html.H5('Gols'),
-                html.H3(gols)
+                html.H3(f"{gols} ({momento_gols})")
             ])
         ])),
         dbc.Col(dbc.Card([
             dbc.CardBody([
                 html.H5('Assistências'),
-                html.H3(assists)
+                html.H3(f"{assists} ({momento_assists})")
             ])
         ])),
         dbc.Col(dbc.Card([
