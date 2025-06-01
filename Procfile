@@ -1,1 +1,1 @@
-web: gunicorn dashboard_chapiuski:server -b :$PORT 
+web: gunicorn --bind 0.0.0.0:$PORT dashboard_chapiuski:server --workers 4 --threads 4 
