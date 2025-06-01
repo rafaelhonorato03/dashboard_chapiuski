@@ -1,22 +1,9 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import os
-os.environ['MPLCONFIGDIR'] = os.getcwd()
-import matplotlib
-matplotlib.use('Agg')
-matplotlib.rcParams['backend'] = 'Agg'
-import matplotlib.pyplot as plt
-import seaborn as sns
-import networkx as nx
 from datetime import timedelta
-from math import pi
 from collections import Counter
 from itertools import combinations
-
-# Configuração do matplotlib
-plt.style.use('default')
-sns.set_style('whitegrid')
 
 dados_chap = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQqKawlrhvZxCUepOzcl4jG9ejActoqNd11Hs6hDverwxV0gv9PRYjwVxs6coMWsoopfH41EuSLRN-v/pub?output=csv"
 
@@ -48,31 +35,11 @@ def criar_grafico_evolucao(df, jogadores, coluna):
         
         dados_acumulados = pd.concat([dados_acumulados, dados_jogador])
     
-    plt.figure(figsize=(12, 6))
-    sns.set_style("whitegrid")
-    
-    # Criar o gráfico de linhas com seaborn
-    ax = sns.lineplot(data=dados_acumulados, 
-                     x='Data', 
-                     y=f'{coluna}_Acumulado', 
-                     hue='Jogador',
-                     linewidth=2.5,
-                     marker='o')
-    
-    # Personalizar o gráfico
-    plt.title(f'Evolução de {coluna}s Acumulados', pad=20, size=14)
-    plt.xlabel('Data')
-    plt.ylabel(f'Total de {coluna}s')
-    
-    # Rotacionar labels do eixo x para melhor legibilidade
-    plt.xticks(rotation=45)
-    
-    # Ajustar o layout
-    plt.tight_layout()
-    
-    # Mostrar o gráfico
-    st.pyplot(plt.gcf())
-    plt.close()
+    # Usar st.line_chart do Streamlit
+    chart_data = dados_acumulados.pivot(index='Data', 
+                                      columns='Jogador', 
+                                      values=f'{coluna}_Acumulado')
+    st.line_chart(chart_data)
 
 def criar_rede_entrosamento(df, coluna, titulo):
     top_7_frequentes = df['Jogador'].value_counts().head(7).index.tolist()
@@ -88,59 +55,28 @@ def criar_rede_entrosamento(df, coluna, titulo):
     
     media_dict = {par: soma[par]/semanas[par] if semanas[par]>0 else 0 for par in soma}
     
-    G = nx.Graph()
-    for (j1, j2), val in media_dict.items():
-        if val > 0:
-            G.add_edge(j1, j2, weight=val)
+    # Criar DataFrame para visualização
+    conexoes_df = pd.DataFrame([
+        {'Jogador 1': j1, 'Jogador 2': j2, 'Média': val}
+        for (j1, j2), val in media_dict.items()
+        if val > 0
+    ]).sort_values('Média', ascending=False)
     
-    if len(G.edges) == 0:
+    if len(conexoes_df) == 0:
         st.info(f"Nenhuma conexão encontrada para {titulo}")
         return
     
-    # Criar figura com tamanho adequado e definir os axes
-    fig, ax = plt.subplots(figsize=(12, 8))
-    
-    # Definir o layout da rede
-    pos = nx.spring_layout(G, k=1, iterations=50)
-    
-    # Obter os pesos das arestas para definir suas larguras
-    edge_weights = [G[u][v]['weight'] for u, v in G.edges()]
-    
-    # Normalizar os pesos para larguras visualmente apropriadas
-    max_width = 10
-    edge_widths = [max_width * w / max(edge_weights) for w in edge_weights]
-    
-    # Desenhar as arestas
-    nx.draw_networkx_edges(G, pos, width=edge_widths, alpha=0.5, edge_color='gray', ax=ax)
-    
-    # Calcular o peso total de cada nó (soma dos pesos de todas as suas conexões)
-    node_weights = [sum(G[node][neighbor]['weight'] for neighbor in G[node]) for node in G.nodes()]
-    
-    # Desenhar os nós
-    node_sizes = [3000 * G.degree(node) for node in G.nodes()]
-    nodes = nx.draw_networkx_nodes(G, pos, 
-                                 node_size=node_sizes,
-                                 node_color=node_weights,
-                                 cmap=plt.cm.YlOrRd,
-                                 alpha=0.7,
-                                 ax=ax)
-    
-    # Adicionar labels aos nós
-    nx.draw_networkx_labels(G, pos, font_size=10, font_weight='bold', ax=ax)
-    
-    # Adicionar colorbar
-    plt.colorbar(nodes, ax=ax, label='Força Total das Conexões')
-    
-    # Configurar o título e remover eixos
-    ax.set_title(titulo, pad=20, size=14)
-    ax.axis('off')
-    
-    # Ajustar o layout
-    plt.tight_layout()
-    
-    # Mostrar o gráfico
-    st.pyplot(fig)
-    plt.close()
+    st.dataframe(
+        conexoes_df,
+        column_config={
+            'Média': st.column_config.ProgressColumn(
+                'Média',
+                format='%.2f',
+                min_value=0,
+                max_value=conexoes_df['Média'].max()
+            )
+        }
+    )
 
 def criar_radar(df, jogadores, titulo):
     metricas = []
@@ -166,56 +102,19 @@ def criar_radar(df, jogadores, titulo):
     
     if not metricas:
         return
-    
-    df_metricas = pd.DataFrame(metricas)
-    colunas_norm = ['Gols', 'Gols/Jogo', 'Assistências', 'Assistências/Jogo', 
-                    'Frequência (%)', 'Taxa de Vitória (%)']
-    
-    df_norm = df_metricas.copy()
-    for col in colunas_norm:
-        max_val = df_metricas[col].max()
-        if max_val > 0:
-            df_norm[col] = df_metricas[col] / max_val
-    
-    # Número de variáveis
-    num_vars = len(colunas_norm)
-    
-    # Calcular os ângulos para cada eixo
-    angles = [n / float(num_vars) * 2 * pi for n in range(num_vars)]
-    angles += angles[:1]
-    
-    # Criar a figura
-    fig, ax = plt.subplots(figsize=(10, 10), subplot_kw=dict(projection='polar'))
-    
-    # Plotar os dados para cada jogador
-    for idx, jogador in enumerate(df_norm['Jogador']):
-        valores = df_norm.loc[df_norm['Jogador'] == jogador, colunas_norm].values.flatten()
-        valores = np.append(valores, valores[0])
         
-        # Plotar os dados
-        ax.plot(angles, valores, linewidth=2, linestyle='solid', label=jogador)
-        ax.fill(angles, valores, alpha=0.1)
-    
-    # Configurar os eixos
-    ax.set_theta_offset(pi / 2)
-    ax.set_theta_direction(-1)
-    
-    # Definir os labels
-    ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(colunas_norm)
-    
-    # Adicionar título e legenda
-    plt.title(titulo, y=1.05, size=14)
-    plt.legend(loc='upper right', bbox_to_anchor=(0.1, 0.1))
-    
-    # Mostrar o gráfico
-    st.pyplot(plt.gcf())
-    plt.close()
-
-def calcular_vitorias(df):
-    df = df.copy()
-    df['vitoria'] = (df['Situação'] == 'Vitória').astype(int)
-    return df
+    df_metricas = pd.DataFrame(metricas)
+    st.dataframe(
+        df_metricas.set_index('Jogador'),
+        column_config={
+            'Gols': st.column_config.NumberColumn('Gols', format='%d'),
+            'Gols/Jogo': st.column_config.NumberColumn('Gols/Jogo', format='%.2f'),
+            'Assistências': st.column_config.NumberColumn('Assistências', format='%d'),
+            'Assistências/Jogo': st.column_config.NumberColumn('Assistências/Jogo', format='%.2f'),
+            'Frequência (%)': st.column_config.ProgressColumn('Frequência (%)', format='%.1f%%'),
+            'Taxa de Vitória (%)': st.column_config.ProgressColumn('Taxa de Vitória (%)', format='%.1f%%')
+        }
+    )
 
 def analisar_momento(df, jogador, coluna, titulo, cor):
     datas_com_jogos = pd.Series(df['Data'].unique()).sort_values()
@@ -226,30 +125,13 @@ def analisar_momento(df, jogador, coluna, titulo, cor):
     dados_jogador[coluna] = dados_jogador[coluna].fillna(0)
     dados_jogador['Media_Movel'] = dados_jogador[coluna].rolling(window=4, min_periods=1).mean()
     
-    # Criar figura e axes
-    fig, ax = plt.subplots(figsize=(10, 6))
+    # Usar st.line_chart do Streamlit
+    chart_data = pd.DataFrame({
+        'Por Jogo': dados_jogador[coluna],
+        'Média Móvel (4 jogos)': dados_jogador['Media_Movel']
+    }, index=dados_jogador['Data'])
     
-    # Plotar linha com marcadores para valores por jogo
-    ax.plot(dados_jogador['Data'], dados_jogador[coluna], 
-            marker='o', linestyle='-', color=cor, 
-            label='Por Jogo', alpha=0.7)
-    
-    # Plotar linha da média móvel
-    ax.plot(dados_jogador['Data'], dados_jogador['Media_Movel'], 
-            color='red', linestyle='--', 
-            label='Média Móvel (4 jogos)', alpha=0.8)
-    
-    # Configurar o gráfico
-    ax.set_title(f'{jogador} - {titulo}', pad=20, size=14)
-    ax.set_xlabel('Data do Jogo')
-    ax.set_ylabel('Quantidade')
-    ax.legend()
-    
-    # Rotacionar labels do eixo x para melhor legibilidade
-    plt.xticks(rotation=45)
-    
-    # Ajustar o layout
-    plt.tight_layout()
+    st.line_chart(chart_data)
     
     ultimos_4 = dados_jogador[coluna].tail(4).mean()
     media_geral = dados_jogador[coluna].mean()
@@ -264,13 +146,9 @@ def analisar_momento(df, jogador, coluna, titulo, cor):
     ultimos_4_valores = dados_jogador[coluna].tail(4).tolist()
     ultimos_4_datas = dados_jogador['Data'].tail(4).dt.strftime('%d/%m').tolist()
     
-    col1, col2 = st.columns(2)
-    col1.pyplot(fig)
-    plt.close()
-    
     metrica = "gols" if coluna == 'Gol' else "assistências" if coluna == 'Assistência' else "vitórias"
     
-    col2.markdown(f"""
+    st.markdown(f"""
     **Análise de {metrica.title()} - {jogador}**
     - Status: {momento}
     - Média de {metrica} nos últimos 4 jogos: {ultimos_4:.2f}
@@ -283,6 +161,11 @@ def analisar_momento(df, jogador, coluna, titulo, cor):
     - {ultimos_4_datas[2]}: {ultimos_4_valores[2]:.0f}
     - {ultimos_4_datas[3]}: {ultimos_4_valores[3]:.0f}
     """)
+
+def calcular_vitorias(df):
+    df = df.copy()
+    df['vitoria'] = (df['Situação'] == 'Vitória').astype(int)
+    return df
 
 def analisar_entrosamento(df, jogador_central):
     conexoes = {}
@@ -397,25 +280,13 @@ rankings = df_filt.groupby('Jogador').agg({
 
 # Ranking de Gols
 st.subheader("⚽ Ranking de Goleadores")
-fig_gols, ax_gols = plt.subplots(figsize=(10, 6))
-gols_plot = rankings.nlargest(10, 'Gol').sort_values('Gol')
-ax_gols.barh(gols_plot['Jogador'], gols_plot['Gol'], color='gold')
-ax_gols.set_xlabel('Gols')
-for i, v in enumerate(gols_plot['Gol']):
-    ax_gols.text(v, i, f' {int(v)}', va='center')
-plt.tight_layout()
-st.pyplot(fig_gols)
+gols_plot = rankings.nlargest(10, 'Gol').sort_values('Gol', ascending=True)
+st.bar_chart(gols_plot.set_index('Jogador')['Gol'])
 
 # Ranking de Assistências
 st.subheader("👟 Ranking de Assistentes")
-fig_assist, ax_assist = plt.subplots(figsize=(10, 6))
-assist_plot = rankings.nlargest(10, 'Assistência').sort_values('Assistência')
-ax_assist.barh(assist_plot['Jogador'], assist_plot['Assistência'], color='gold')
-ax_assist.set_xlabel('Assistências')
-for i, v in enumerate(assist_plot['Assistência']):
-    ax_assist.text(v, i, f' {int(v)}', va='center')
-plt.tight_layout()
-st.pyplot(fig_assist)
+assist_plot = rankings.nlargest(10, 'Assistência').sort_values('Assistência', ascending=True)
+st.bar_chart(assist_plot.set_index('Jogador')['Assistência'])
 
 # 5 - EVOLUÇÃO
 st.markdown("### 📈 Evolução")
@@ -442,11 +313,17 @@ participacao = (
     .unstack(fill_value=0)
 )
 
-fig, ax = plt.subplots(figsize=(10, len(top_10_frequentes)*0.5 + 2))
-sns.heatmap(participacao, cmap='Greens', cbar=False, linewidths=0.5, linecolor='gray', ax=ax)
-ax.set_xlabel('Semana')
-ax.set_ylabel('Jogador')
-st.pyplot(fig)
+# Usar st.dataframe com formatação condicional
+st.dataframe(
+    participacao,
+    use_container_width=True,
+    hide_index=False,
+    column_config={col: st.column_config.NumberColumn(
+        str(col),
+        format="%d",
+        background="rgb(0, 200, 0, {value/max_value})"
+    ) for col in participacao.columns}
+)
 
 # 7 - REDES DE ENTROSAMENTO
 st.markdown("### 🤝 Redes de Entrosamento")
@@ -515,35 +392,15 @@ if total_jogos_jogador > 0:
         
         # Parcerias
         st.subheader("🎯 Top 5 Parcerias")
-        fig, ax = plt.subplots(figsize=(10, 6))
-        
-        # Plotar barras empilhadas
-        ax.barh(top_conexoes.index, top_conexoes['gols'], color='#2ecc71', label='Gols', alpha=0.7)
-        ax.barh(top_conexoes.index, top_conexoes['assists'], left=top_conexoes['gols'], 
-                color='#9b59b6', label='Assistências', alpha=0.7)
-        
-        # Adicionar rótulos nas barras
-        for i, (gols, assists) in enumerate(zip(top_conexoes['gols'], top_conexoes['assists'])):
-            # Rótulo para gols
-            if gols > 0:
-                ax.text(gols/2, i, f'G:{int(gols)}', ha='center', va='center', color='white')
-            # Rótulo para assistências
-            if assists > 0:
-                ax.text(gols + assists/2, i, f'A:{int(assists)}', ha='center', va='center', color='white')
-        
-        ax.set_title(f'Principais Parcerias de {jogador_selecionado}')
-        ax.legend()
-        plt.tight_layout()
-        st.pyplot(fig)
-        
-        # Taxa de Vitória
-        st.subheader("🏆 Taxa de Vitória com Parceiros")
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.barh(top_conexoes.index, top_conexoes['taxa_vitoria'], color='gold')
-        for i, v in enumerate(top_conexoes['taxa_vitoria']):
-            ax.text(v, i, f' {v:.1f}%', va='center')
-        ax.set_title(f'Taxa de Vitória com {jogador_selecionado}')
-        plt.tight_layout()
-        st.pyplot(fig)
+        st.dataframe(
+            top_conexoes,
+            column_config={
+                'gols': st.column_config.NumberColumn('Gols', format='%d'),
+                'assists': st.column_config.NumberColumn('Assistências', format='%d'),
+                'total_participacoes': st.column_config.NumberColumn('Total', format='%d'),
+                'taxa_vitoria': st.column_config.ProgressColumn('Taxa de Vitória', format='%.1f%%'),
+                'semanas_juntos': st.column_config.NumberColumn('Semanas Juntos', format='%d')
+            }
+        )
 else:
     st.info(f"Não há dados para {jogador_selecionado} no período selecionado.")
