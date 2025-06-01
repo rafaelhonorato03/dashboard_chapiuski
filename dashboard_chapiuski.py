@@ -8,10 +8,14 @@ from collections import Counter
 from itertools import combinations
 import plotly.express as px
 import plotly.graph_objects as go
+import os
 
 # Inicializar o app
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 server = app.server
+
+# Configurar a porta do servidor
+port = int(os.environ.get('PORT', 8050))
 
 # URL dos dados
 dados_chap = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQqKawlrhvZxCUepOzcl4jG9ejActoqNd11Hs6hDverwxV0gv9PRYjwVxs6coMWsoopfH41EuSLRN-v/pub?output=csv"
@@ -391,4 +395,4 @@ def update_analise_individual(jogador, data_inicio, data_fim):
     return metricas, momento_gols, momento_assists
 
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run_server(debug=False, host='0.0.0.0', port=port)
