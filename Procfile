@@ -1,1 +1,1 @@
-web: gunicorn dashboard_chapiuski:server 
+web: gunicorn dashboard_chapiuski:server -b :$PORT 
