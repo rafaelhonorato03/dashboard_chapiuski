@@ -9,7 +9,6 @@ matplotlib.rcParams['backend'] = 'Agg'
 import matplotlib.pyplot as plt
 import seaborn as sns
 import networkx as nx
-from scipy import stats
 from datetime import timedelta
 from math import pi
 from collections import Counter
