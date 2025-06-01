@@ -1,14 +1,38 @@
-import streamlit as st
+import dash
+from dash import dcc, html, Input, Output, State
+import dash_bootstrap_components as dbc
 import pandas as pd
 import numpy as np
-from datetime import timedelta
+from datetime import datetime, timedelta
 from collections import Counter
 from itertools import combinations
+import plotly.express as px
+import plotly.graph_objects as go
 
+# Inicializar o app
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+server = app.server
+
+# URL dos dados
 dados_chap = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQqKawlrhvZxCUepOzcl4jG9ejActoqNd11Hs6hDverwxV0gv9PRYjwVxs6coMWsoopfH41EuSLRN-v/pub?output=csv"
 
 # --- FUNÇÕES AUXILIARES ---
-def criar_grafico_evolucao(df, jogadores, coluna):
+def carregar_dados():
+    try:
+        df = pd.read_csv(dados_chap, decimal=',')
+        df['Gol'] = pd.to_numeric(df['Gol'], errors='coerce').fillna(0).astype(int)
+        df['Assistência'] = pd.to_numeric(df['Assistência'], errors='coerce').fillna(0).astype(int)
+        df['Data'] = pd.to_datetime(df['Data'], dayfirst=True)
+        df = df.sort_values('Data')
+        primeira_data = df['Data'].min()
+        df['Semana'] = ((df['Data'] - primeira_data).dt.days // 7) + 1
+        df['Jogador'] = df['Jogador'].str.strip()
+        return df
+    except Exception as e:
+        print(f"Erro ao carregar os dados: {str(e)}")
+        return None
+
+def criar_grafico_evolucao(df, jogadores, coluna, data_inicio, data_fim):
     data_inicio_dt = pd.to_datetime(data_inicio)
     data_fim_dt = pd.to_datetime(data_fim)
     
@@ -35,88 +59,66 @@ def criar_grafico_evolucao(df, jogadores, coluna):
         
         dados_acumulados = pd.concat([dados_acumulados, dados_jogador])
     
-    # Usar st.line_chart do Streamlit
-    chart_data = dados_acumulados.pivot(index='Data', 
-                                      columns='Jogador', 
-                                      values=f'{coluna}_Acumulado')
-    st.line_chart(chart_data)
-
-def criar_rede_entrosamento(df, coluna, titulo):
-    top_7_frequentes = df['Jogador'].value_counts().head(7).index.tolist()
+    fig = px.line(dados_acumulados, 
+                  x='Data', 
+                  y=f'{coluna}_Acumulado',
+                  color='Jogador',
+                  title=f'Evolução de {coluna}s Acumulados')
     
-    soma = Counter()
-    semanas = Counter()
-    for semana, grupo in df.groupby('Semana'):
-        jogs = grupo['Jogador'].unique()
-        for par in combinations(sorted(jogs), 2):
-            if par[0] in top_7_frequentes and par[1] in top_7_frequentes:
-                soma[par] += grupo[grupo['Jogador'].isin(par)][coluna].sum()
-                semanas[par] += 1
-    
-    media_dict = {par: soma[par]/semanas[par] if semanas[par]>0 else 0 for par in soma}
-    
-    # Criar DataFrame para visualização
-    conexoes_df = pd.DataFrame([
-        {'Jogador 1': j1, 'Jogador 2': j2, 'Média': val}
-        for (j1, j2), val in media_dict.items()
-        if val > 0
-    ]).sort_values('Média', ascending=False)
-    
-    if len(conexoes_df) == 0:
-        st.info(f"Nenhuma conexão encontrada para {titulo}")
-        return
-    
-    st.dataframe(
-        conexoes_df,
-        column_config={
-            'Média': st.column_config.ProgressColumn(
-                'Média',
-                format='%.2f',
-                min_value=0,
-                max_value=conexoes_df['Média'].max()
-            )
-        }
+    fig.update_layout(
+        xaxis_title='Data',
+        yaxis_title=f'Total de {coluna}s',
+        showlegend=True
     )
+    
+    return fig
 
-def criar_radar(df, jogadores, titulo):
-    metricas = []
-    total_semanas = df['Semana'].nunique()
+def criar_ranking(df, coluna, titulo):
+    rankings = df.groupby('Jogador')[coluna].sum().sort_values(ascending=True).tail(10)
     
-    for jogador in jogadores:
-        dados_jogador = df[df['Jogador'] == jogador]
-        jogos = len(dados_jogador)
-        if jogos > 0:
-            semanas_jogadas = dados_jogador['Semana'].nunique()
-            vitorias = (dados_jogador['Situação'] == 'Vitória').sum()
-            taxa_vitoria = (vitorias / jogos * 100)
-            
-            metricas.append({
-                'Jogador': jogador,
-                'Gols': dados_jogador['Gol'].sum(),
-                'Gols/Jogo': dados_jogador['Gol'].mean(),
-                'Assistências': dados_jogador['Assistência'].sum(),
-                'Assistências/Jogo': dados_jogador['Assistência'].mean(),
-                'Frequência (%)': (semanas_jogadas / total_semanas * 100),
-                'Taxa de Vitória (%)': taxa_vitoria
-            })
+    fig = go.Figure(go.Bar(
+        x=rankings.values,
+        y=rankings.index,
+        orientation='h',
+        text=rankings.values,
+        textposition='auto',
+    ))
     
-    if not metricas:
-        return
-        
-    df_metricas = pd.DataFrame(metricas)
-    st.dataframe(
-        df_metricas.set_index('Jogador'),
-        column_config={
-            'Gols': st.column_config.NumberColumn('Gols', format='%d'),
-            'Gols/Jogo': st.column_config.NumberColumn('Gols/Jogo', format='%.2f'),
-            'Assistências': st.column_config.NumberColumn('Assistências', format='%d'),
-            'Assistências/Jogo': st.column_config.NumberColumn('Assistências/Jogo', format='%.2f'),
-            'Frequência (%)': st.column_config.ProgressColumn('Frequência (%)', format='%.1f%%'),
-            'Taxa de Vitória (%)': st.column_config.ProgressColumn('Taxa de Vitória (%)', format='%.1f%%')
-        }
+    fig.update_layout(
+        title=titulo,
+        xaxis_title=coluna,
+        yaxis_title='Jogador',
+        height=400
     )
+    
+    return fig
 
-def analisar_momento(df, jogador, coluna, titulo, cor):
+def criar_heatmap_participacao(df):
+    top_10_frequentes = df['Jogador'].value_counts().head(10).index.tolist()
+    participacao = (
+        df[df['Jogador'].isin(top_10_frequentes)]
+        .groupby(['Jogador', 'Semana'])
+        .size()
+        .unstack(fill_value=0)
+    )
+    
+    fig = go.Figure(data=go.Heatmap(
+        z=participacao.values,
+        x=participacao.columns,
+        y=participacao.index,
+        colorscale='Greens'
+    ))
+    
+    fig.update_layout(
+        title='Participação por Semana',
+        xaxis_title='Semana',
+        yaxis_title='Jogador',
+        height=400
+    )
+    
+    return fig
+
+def analisar_momento(df, jogador, coluna):
     datas_com_jogos = pd.Series(df['Data'].unique()).sort_values()
     dados_jogador = pd.DataFrame({'Data': datas_com_jogos})
     jogos_jogador = df[df['Jogador'] == jogador][['Data', coluna]].copy()
@@ -125,282 +127,268 @@ def analisar_momento(df, jogador, coluna, titulo, cor):
     dados_jogador[coluna] = dados_jogador[coluna].fillna(0)
     dados_jogador['Media_Movel'] = dados_jogador[coluna].rolling(window=4, min_periods=1).mean()
     
-    # Usar st.line_chart do Streamlit
-    chart_data = pd.DataFrame({
-        'Por Jogo': dados_jogador[coluna],
-        'Média Móvel (4 jogos)': dados_jogador['Media_Movel']
-    }, index=dados_jogador['Data'])
+    fig = go.Figure()
     
-    st.line_chart(chart_data)
+    fig.add_trace(go.Scatter(
+        x=dados_jogador['Data'],
+        y=dados_jogador[coluna],
+        name='Por Jogo',
+        mode='lines+markers'
+    ))
     
-    ultimos_4 = dados_jogador[coluna].tail(4).mean()
-    media_geral = dados_jogador[coluna].mean()
+    fig.add_trace(go.Scatter(
+        x=dados_jogador['Data'],
+        y=dados_jogador['Media_Movel'],
+        name='Média Móvel (4 jogos)',
+        line=dict(dash='dash')
+    ))
     
-    if media_geral == 0:
-        momento = "❌ Sem dados suficientes"
-        diferenca = 0
-    else:
-        momento = "🔥 Em Alta" if ultimos_4 > media_geral * 1.2 else "❄️ Em Baixa" if ultimos_4 < media_geral * 0.8 else "➡️ Estável"
-        diferenca = ((ultimos_4/media_geral - 1)*100) if media_geral > 0 else 0
+    fig.update_layout(
+        title=f'Evolução de {coluna}s - {jogador}',
+        xaxis_title='Data',
+        yaxis_title='Quantidade',
+        height=400
+    )
     
-    ultimos_4_valores = dados_jogador[coluna].tail(4).tolist()
-    ultimos_4_datas = dados_jogador['Data'].tail(4).dt.strftime('%d/%m').tolist()
-    
-    metrica = "gols" if coluna == 'Gol' else "assistências" if coluna == 'Assistência' else "vitórias"
-    
-    st.markdown(f"""
-    **Análise de {metrica.title()} - {jogador}**
-    - Status: {momento}
-    - Média de {metrica} nos últimos 4 jogos: {ultimos_4:.2f}
-    - Média geral de {metrica}: {media_geral:.2f}
-    - Diferença: {diferenca:.1f}% em relação à média
-    
-    **Últimos 4 jogos ({metrica}):**
-    - {ultimos_4_datas[0]}: {ultimos_4_valores[0]:.0f}
-    - {ultimos_4_datas[1]}: {ultimos_4_valores[1]:.0f}
-    - {ultimos_4_datas[2]}: {ultimos_4_valores[2]:.0f}
-    - {ultimos_4_datas[3]}: {ultimos_4_valores[3]:.0f}
-    """)
+    return fig
 
-def calcular_vitorias(df):
-    df = df.copy()
-    df['vitoria'] = (df['Situação'] == 'Vitória').astype(int)
-    return df
-
-def analisar_entrosamento(df, jogador_central):
-    conexoes = {}
-    for semana, grupo in df.groupby('Semana'):
-        if jogador_central in grupo['Jogador'].values:
-            jogadores_semana = grupo['Jogador'].unique()
-            for outro_jogador in jogadores_semana:
-                if outro_jogador != jogador_central:
-                    dados_dupla = grupo[grupo['Jogador'].isin([jogador_central, outro_jogador])]
-                    
-                    if len(dados_dupla) == 2:
-                        gols = dados_dupla['Gol'].sum()
-                        assists = dados_dupla['Assistência'].sum()
-                        vitoria_na_semana = (dados_dupla['Situação'] == 'Vitória').all()
-                        
-                        if outro_jogador not in conexoes:
-                            conexoes[outro_jogador] = {
-                                'gols': 0, 
-                                'assists': 0, 
-                                'vitorias': 0, 
-                                'jogos': 0,
-                                'semanas_juntos': set()
-                            }
-                        
-                        conexoes[outro_jogador]['gols'] += gols
-                        conexoes[outro_jogador]['assists'] += assists
-                        conexoes[outro_jogador]['vitorias'] += 1 if vitoria_na_semana else 0
-                        conexoes[outro_jogador]['jogos'] += 1
-                        conexoes[outro_jogador]['semanas_juntos'].add(semana)
+# Layout do Dashboard
+app.layout = dbc.Container([
+    html.H1('Chapiuski FC', className='text-center my-4'),
     
-    if conexoes:
-        df_conexoes = pd.DataFrame.from_dict(conexoes, orient='index')
-        df_conexoes['total_participacoes'] = df_conexoes['gols'] + df_conexoes['assists']
-        df_conexoes['taxa_vitoria'] = (df_conexoes['vitorias'] / df_conexoes['jogos'] * 100).round(1)
-        df_conexoes['semanas_juntos'] = df_conexoes['semanas_juntos'].apply(len)
-        return df_conexoes
-    return None
+    # Filtros
+    dbc.Card([
+        dbc.CardBody([
+            html.H3('⚙️ Filtros de Análise', className='card-title'),
+            dbc.Row([
+                dbc.Col([
+                    html.Label('Data Inicial:'),
+                    dcc.DatePickerSingle(
+                        id='data-inicio',
+                        min_date_allowed=datetime(2023, 1, 1),
+                        max_date_allowed=datetime(2024, 12, 31),
+                        initial_visible_month=datetime(2024, 1, 1),
+                        date=datetime(2024, 1, 1)
+                    )
+                ]),
+                dbc.Col([
+                    html.Label('Data Final:'),
+                    dcc.DatePickerSingle(
+                        id='data-fim',
+                        min_date_allowed=datetime(2023, 1, 1),
+                        max_date_allowed=datetime(2024, 12, 31),
+                        initial_visible_month=datetime(2024, 1, 1),
+                        date=datetime(2024, 12, 31)
+                    )
+                ])
+            ])
+        ])
+    ], className='mb-4'),
+    
+    # Números do Período
+    dbc.Card([
+        dbc.CardBody([
+            html.H3('📊 Números do Período', className='card-title'),
+            dbc.Row([
+                dbc.Col(dbc.Card([
+                    dbc.CardBody([
+                        html.H5('Total de Jogos', className='card-title'),
+                        html.H3(id='total-jogos')
+                    ])
+                ])),
+                dbc.Col(dbc.Card([
+                    dbc.CardBody([
+                        html.H5('Total de Gols', className='card-title'),
+                        html.H3(id='total-gols')
+                    ])
+                ])),
+                dbc.Col(dbc.Card([
+                    dbc.CardBody([
+                        html.H5('Total de Assistências', className='card-title'),
+                        html.H3(id='total-assists')
+                    ])
+                ]))
+            ])
+        ])
+    ], className='mb-4'),
+    
+    # Rankings
+    dbc.Card([
+        dbc.CardBody([
+            html.H3('🏆 Rankings do Período', className='card-title'),
+            dbc.Row([
+                dbc.Col([
+                    dcc.Graph(id='ranking-gols')
+                ]),
+                dbc.Col([
+                    dcc.Graph(id='ranking-assists')
+                ])
+            ])
+        ])
+    ], className='mb-4'),
+    
+    # Evolução
+    dbc.Card([
+        dbc.CardBody([
+            html.H3('📈 Evolução', className='card-title'),
+            dcc.Graph(id='evolucao-gols'),
+            dcc.Graph(id='evolucao-assists')
+        ])
+    ], className='mb-4'),
+    
+    # Heatmap de Participação
+    dbc.Card([
+        dbc.CardBody([
+            html.H3('🎯 Participação por Semana', className='card-title'),
+            dcc.Graph(id='heatmap-participacao')
+        ])
+    ], className='mb-4'),
+    
+    # Análise Individual
+    dbc.Card([
+        dbc.CardBody([
+            html.H3('👤 Análise Individual', className='card-title'),
+            dcc.Dropdown(
+                id='jogador-select',
+                placeholder='Selecione um jogador'
+            ),
+            html.Div(id='metricas-jogador'),
+            dcc.Graph(id='momento-gols'),
+            dcc.Graph(id='momento-assists')
+        ])
+    ])
+], fluid=True)
 
-# --- CARREGAMENTO E PREPARAÇÃO DOS DADOS ---
-@st.cache_data
-def carregar_dados():
-    try:
-        df = pd.read_csv(dados_chap, decimal=',')
-        df['Gol'] = pd.to_numeric(df['Gol'], errors='coerce').fillna(0).astype(int)
-        df['Assistência'] = pd.to_numeric(df['Assistência'], errors='coerce').fillna(0).astype(int)
-        df['Data'] = pd.to_datetime(df['Data'], dayfirst=True)
-        df = df.sort_values('Data')
-        primeira_data = df['Data'].min()
-        df['Semana'] = ((df['Data'] - primeira_data).dt.days // 7) + 1
-        df['Jogador'] = df['Jogador'].str.strip()
-        return df
-    except Exception as e:
-        st.error(f"Erro ao carregar os dados: {str(e)}")
-        return None
-
-# 1 - TÍTULO DA PÁGINA
-st.title('Chapiuski FC')
-
-df = carregar_dados()
-if df is None:
-    st.stop()
-
-# 2 - FILTRO DE DATAS
-st.markdown("### ⚙️ Filtros de Análise")
-
-col1, col2 = st.columns(2)
-with col1:
-    data_inicio = st.date_input(
-        'Data Inicial:',
-        value=min(df['Data'].dt.date),
-        min_value=min(df['Data'].dt.date),
-        max_value=max(df['Data'].dt.date)
+# Callbacks
+@app.callback(
+    [Output('total-jogos', 'children'),
+     Output('total-gols', 'children'),
+     Output('total-assists', 'children'),
+     Output('ranking-gols', 'figure'),
+     Output('ranking-assists', 'figure'),
+     Output('evolucao-gols', 'figure'),
+     Output('evolucao-assists', 'figure'),
+     Output('heatmap-participacao', 'figure'),
+     Output('jogador-select', 'options')],
+    [Input('data-inicio', 'date'),
+     Input('data-fim', 'date')]
+)
+def update_dashboard(data_inicio, data_fim):
+    df = carregar_dados()
+    if df is None:
+        return dash.no_update
+    
+    df_filt = df[
+        (df['Data'].dt.date >= pd.to_datetime(data_inicio).date()) &
+        (df['Data'].dt.date <= pd.to_datetime(data_fim).date())
+    ]
+    
+    total_jogos = df_filt['Semana'].nunique()
+    total_gols = int(df_filt['Gol'].sum())
+    total_assists = int(df_filt['Assistência'].sum())
+    
+    ranking_gols = criar_ranking(df_filt, 'Gol', 'Ranking de Goleadores')
+    ranking_assists = criar_ranking(df_filt, 'Assistência', 'Ranking de Assistentes')
+    
+    rankings = df_filt.groupby('Jogador').agg({
+        'Gol': 'sum',
+        'Assistência': 'sum'
+    }).reset_index()
+    
+    evolucao_gols = criar_grafico_evolucao(
+        df_filt, 
+        rankings.nlargest(5, 'Gol')['Jogador'].tolist(),
+        'Gol',
+        data_inicio,
+        data_fim
+    )
+    
+    evolucao_assists = criar_grafico_evolucao(
+        df_filt,
+        rankings.nlargest(5, 'Assistência')['Jogador'].tolist(),
+        'Assistência',
+        data_inicio,
+        data_fim
+    )
+    
+    heatmap = criar_heatmap_participacao(df_filt)
+    
+    jogadores_options = [{'label': j, 'value': j} for j in sorted(df_filt['Jogador'].unique())]
+    
+    return (
+        total_jogos,
+        total_gols,
+        total_assists,
+        ranking_gols,
+        ranking_assists,
+        evolucao_gols,
+        evolucao_assists,
+        heatmap,
+        jogadores_options
     )
 
-with col2:
-    data_fim = st.date_input(
-        'Data Final:',
-        value=max(df['Data'].dt.date),
-        min_value=min(df['Data'].dt.date),
-        max_value=max(df['Data'].dt.date)
-    )
-
-# Filtrar dados por data
-df_filt = df[
-    (df['Data'].dt.date >= data_inicio) &
-    (df['Data'].dt.date <= data_fim)
-]
-
-# Lista de todos os jogadores ordenada alfabeticamente
-todos_jogadores = sorted(df_filt['Jogador'].unique())
-
-# 3 - NÚMEROS TOTAIS
-st.markdown("### 📊 Números do Período")
-total_jogos = df_filt['Semana'].nunique()
-total_gols = df_filt['Gol'].sum()
-total_assist = df_filt['Assistência'].sum()
-
-col1, col2, col3 = st.columns(3)
-col1.metric("Total de Jogos", total_jogos)
-col2.metric("Total de Gols", int(total_gols))
-col3.metric("Total de Assistências", int(total_assist))
-
-# 4 - RANKINGS DO PERÍODO
-st.markdown("### 🏆 Rankings do Período")
-
-# Preparar dados para os rankings
-rankings = df_filt.groupby('Jogador').agg({
-    'Gol': 'sum',
-    'Assistência': 'sum',
-    'Semana': 'nunique'
-}).reset_index()
-
-# Ranking de Gols
-st.subheader("⚽ Ranking de Goleadores")
-gols_plot = rankings.nlargest(10, 'Gol').sort_values('Gol', ascending=True)
-st.bar_chart(gols_plot.set_index('Jogador')['Gol'])
-
-# Ranking de Assistências
-st.subheader("👟 Ranking de Assistentes")
-assist_plot = rankings.nlargest(10, 'Assistência').sort_values('Assistência', ascending=True)
-st.bar_chart(assist_plot.set_index('Jogador')['Assistência'])
-
-# 5 - EVOLUÇÃO
-st.markdown("### 📈 Evolução")
-
-# Gols Acumulados (Top 5)
-st.subheader('Gols Acumulados por Semana (Top 5)')
-top_5_goleadores = rankings.nlargest(5, 'Gol')['Jogador'].tolist()
-gols_acumulados = criar_grafico_evolucao(df_filt, top_5_goleadores, 'Gol')
-
-# Assistências Acumuladas (Top 5)
-st.subheader('Assistências Acumuladas por Semana (Top 5)')
-top_5_assistentes = rankings.nlargest(5, 'Assistência')['Jogador'].tolist()
-assists_acumulados = criar_grafico_evolucao(df_filt, top_5_assistentes, 'Assistência')
-
-# 6 - HEATMAP DE PARTICIPAÇÃO
-st.markdown("### 🎯 Participação por Semana")
-st.markdown("Visualize a frequência de participação dos jogadores mais ativos")
-
-top_10_frequentes = df_filt['Jogador'].value_counts().head(10).index.tolist()
-participacao = (
-    df_filt[df_filt['Jogador'].isin(top_10_frequentes)]
-    .groupby(['Jogador', 'Semana'])
-    .size()
-    .unstack(fill_value=0)
+@app.callback(
+    [Output('metricas-jogador', 'children'),
+     Output('momento-gols', 'figure'),
+     Output('momento-assists', 'figure')],
+    [Input('jogador-select', 'value'),
+     Input('data-inicio', 'date'),
+     Input('data-fim', 'date')]
 )
-
-# Usar st.dataframe com formatação condicional
-st.dataframe(
-    participacao,
-    use_container_width=True,
-    hide_index=False,
-    column_config={col: st.column_config.NumberColumn(
-        str(col),
-        format="%d",
-        background="rgb(0, 200, 0, {value/max_value})"
-    ) for col in participacao.columns}
-)
-
-# 7 - REDES DE ENTROSAMENTO
-st.markdown("### 🤝 Redes de Entrosamento")
-st.markdown("Visualize as conexões entre os jogadores")
-
-criar_rede_entrosamento(df_filt, 'Gol', '⚽ Rede de Gols')
-criar_rede_entrosamento(df_filt, 'Assistência', '👟 Rede de Assistências')
-
-# 8 - COMPARAÇÃO ENTRE JOGADORES
-st.markdown("### 📊 Comparação entre Jogadores")
-st.markdown("Compare as métricas de diferentes jogadores")
-
-jogadores_selecionados = st.multiselect(
-    "Selecione os jogadores para comparar (máximo 5):",
-    todos_jogadores,
-    default=df_filt['Jogador'].value_counts().head(3).index.tolist(),
-    max_selections=5
-)
-
-if jogadores_selecionados:
-    criar_radar(df_filt, jogadores_selecionados, "Comparação entre Jogadores Selecionados")
-
-# 9 - ANÁLISE INDIVIDUAL
-st.markdown("### 👤 Análise Individual")
-st.markdown("Análise detalhada por jogador")
-
-# Seletor de jogador
-jogador_mais_frequente = df_filt['Jogador'].value_counts().index[0]
-jogador_selecionado = st.selectbox(
-    "Selecione um jogador:",
-    todos_jogadores,
-    index=todos_jogadores.index(jogador_mais_frequente)
-)
-
-# Métricas individuais
-dados_jogador = df_filt[df_filt['Jogador'] == jogador_selecionado]
-total_jogos_jogador = len(dados_jogador)
-if total_jogos_jogador > 0:
-    gols_jogador = dados_jogador['Gol'].sum()
-    assists_jogador = dados_jogador['Assistência'].sum()
-    vitorias_jogador = (dados_jogador['Situação'] == 'Vitória').sum()
+def update_analise_individual(jogador, data_inicio, data_fim):
+    if not jogador:
+        return dash.no_update
     
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total de Jogos", total_jogos_jogador)
-    col2.metric("Total de Gols", int(gols_jogador))
-    col3.metric("Total de Assistências", int(assists_jogador))
+    df = carregar_dados()
+    if df is None:
+        return dash.no_update
     
-    col4, col5, col6 = st.columns(3)
-    col4.metric("Gols por Jogo", f"{gols_jogador/total_jogos_jogador:.2f}")
-    col5.metric("Assistências por Jogo", f"{assists_jogador/total_jogos_jogador:.2f}")
-    col6.metric("Taxa de Vitória", f"{(vitorias_jogador/total_jogos_jogador*100):.1f}%")
+    df_filt = df[
+        (df['Data'].dt.date >= pd.to_datetime(data_inicio).date()) &
+        (df['Data'].dt.date <= pd.to_datetime(data_fim).date())
+    ]
     
-    st.markdown("#### 📈 Momento do Jogador")
-    st.markdown("Análise da evolução de gols, assistências e vitórias nas últimas semanas")
-    analisar_momento(df_filt, jogador_selecionado, 'Gol', 'Evolução de Gols por Jogo', 'green')
-    analisar_momento(df_filt, jogador_selecionado, 'Assistência', 'Evolução de Assistências por Jogo', 'purple')
-    df_vitorias = calcular_vitorias(df_filt)
-    analisar_momento(df_vitorias, jogador_selecionado, 'vitoria', 'Evolução de Vitórias por Jogo', 'gold')
+    dados_jogador = df_filt[df_filt['Jogador'] == jogador]
+    total_jogos = len(dados_jogador)
     
-    st.markdown("#### 🤝 Parcerias do Jogador")
-    st.markdown("Análise das principais conexões em campo")
-    conexoes = analisar_entrosamento(df_filt, jogador_selecionado)
+    if total_jogos == 0:
+        return html.Div('Não há dados para este jogador no período selecionado.'), {}, {}
     
-    if not conexoes is None and not conexoes.empty:
-        top_conexoes = conexoes.nlargest(5, 'total_participacoes')
-        
-        # Parcerias
-        st.subheader("🎯 Top 5 Parcerias")
-        st.dataframe(
-            top_conexoes,
-            column_config={
-                'gols': st.column_config.NumberColumn('Gols', format='%d'),
-                'assists': st.column_config.NumberColumn('Assistências', format='%d'),
-                'total_participacoes': st.column_config.NumberColumn('Total', format='%d'),
-                'taxa_vitoria': st.column_config.ProgressColumn('Taxa de Vitória', format='%.1f%%'),
-                'semanas_juntos': st.column_config.NumberColumn('Semanas Juntos', format='%d')
-            }
-        )
-else:
-    st.info(f"Não há dados para {jogador_selecionado} no período selecionado.")
+    gols = dados_jogador['Gol'].sum()
+    assists = dados_jogador['Assistência'].sum()
+    vitorias = (dados_jogador['Situação'] == 'Vitória').sum()
+    
+    metricas = dbc.Row([
+        dbc.Col(dbc.Card([
+            dbc.CardBody([
+                html.H5('Jogos'),
+                html.H3(total_jogos)
+            ])
+        ])),
+        dbc.Col(dbc.Card([
+            dbc.CardBody([
+                html.H5('Gols'),
+                html.H3(gols)
+            ])
+        ])),
+        dbc.Col(dbc.Card([
+            dbc.CardBody([
+                html.H5('Assistências'),
+                html.H3(assists)
+            ])
+        ])),
+        dbc.Col(dbc.Card([
+            dbc.CardBody([
+                html.H5('Taxa de Vitória'),
+                html.H3(f'{(vitorias/total_jogos*100):.1f}%')
+            ])
+        ]))
+    ])
+    
+    momento_gols = analisar_momento(df_filt, jogador, 'Gol')
+    momento_assists = analisar_momento(df_filt, jogador, 'Assistência')
+    
+    return metricas, momento_gols, momento_assists
+
+if __name__ == '__main__':
+    app.run_server(debug=True)
