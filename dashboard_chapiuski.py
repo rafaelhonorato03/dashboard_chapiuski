@@ -26,14 +26,22 @@ def carregar_dados():
         print("Tentando carregar dados da URL:", dados_chap)
         df = pd.read_csv(dados_chap, decimal=',')
         print("Dados carregados com sucesso. Shape:", df.shape)
+        print("Primeiras linhas dos dados brutos:")
+        print(df.head())
+        
         df['Gol'] = pd.to_numeric(df['Gol'], errors='coerce').fillna(0).astype(int)
         df['Assistência'] = pd.to_numeric(df['Assistência'], errors='coerce').fillna(0).astype(int)
         df['Data'] = pd.to_datetime(df['Data'], dayfirst=True)
+        print("Range de datas:", df['Data'].min(), "até", df['Data'].max())
+        
         df = df.sort_values('Data')
         primeira_data = df['Data'].min()
         df['Semana'] = ((df['Data'] - primeira_data).dt.days // 7) + 1
         df['Jogador'] = df['Jogador'].str.strip()
+        
         print("Processamento dos dados concluído com sucesso")
+        print("Total de jogadores únicos:", df['Jogador'].nunique())
+        print("Total de semanas:", df['Semana'].nunique())
         return df
     except Exception as e:
         print(f"Erro ao carregar os dados: {str(e)}")
@@ -248,8 +256,9 @@ app.layout = dbc.Container([
                         id='data-inicio',
                         min_date_allowed=datetime(2023, 1, 1),
                         max_date_allowed=datetime(2024, 12, 31),
-                        initial_visible_month=datetime(2024, 1, 1),
-                        date=datetime(2024, 1, 1)
+                        initial_visible_month=datetime(2023, 1, 1),
+                        date=datetime(2023, 1, 1),
+                        display_format='DD/MM/YYYY'
                     )
                 ]),
                 dbc.Col([
@@ -258,8 +267,9 @@ app.layout = dbc.Container([
                         id='data-fim',
                         min_date_allowed=datetime(2023, 1, 1),
                         max_date_allowed=datetime(2024, 12, 31),
-                        initial_visible_month=datetime(2024, 1, 1),
-                        date=datetime(2024, 12, 31)
+                        initial_visible_month=datetime(2024, 12, 31),
+                        date=datetime(2024, 12, 31),
+                        display_format='DD/MM/YYYY'
                     )
                 ])
             ])
