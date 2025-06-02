@@ -222,73 +222,6 @@ def criar_radar(df, jogadores):
     
     return fig
 
-def criar_rede_entrosamento(df, coluna, titulo):
-    top_7_frequentes = df['Jogador'].value_counts().head(7).index.tolist()
-    
-    soma = Counter()
-    semanas = Counter()
-    for semana, grupo in df.groupby('Semana'):
-        jogs = grupo['Jogador'].unique()
-        for par in combinations(sorted(jogs), 2):
-            if par[0] in top_7_frequentes and par[1] in top_7_frequentes:
-                soma[par] += grupo[grupo['Jogador'].isin(par)][coluna].sum()
-                semanas[par] += 1
-    
-    media_dict = {par: soma[par]/semanas[par] if semanas[par]>0 else 0 for par in soma}
-    
-    nodes = list(set([j for par in media_dict.keys() for j in par]))
-    node_indices = {node: i for i, node in enumerate(nodes)}
-    
-    edge_x = []
-    edge_y = []
-    edge_weights = []
-    
-    for (j1, j2), peso in media_dict.items():
-        if peso > 0:
-            x0 = np.cos(2*np.pi*node_indices[j1]/len(nodes))
-            y0 = np.sin(2*np.pi*node_indices[j1]/len(nodes))
-            x1 = np.cos(2*np.pi*node_indices[j2]/len(nodes))
-            y1 = np.sin(2*np.pi*node_indices[j2]/len(nodes))
-            
-            edge_x.extend([x0, x1, None])
-            edge_y.extend([y0, y1, None])
-            edge_weights.append(peso)
-    
-    edges_trace = go.Scatter(
-        x=edge_x, y=edge_y,
-        line=dict(width=np.array(edge_weights)*2, color='#888'),
-        hoverinfo='none',
-        mode='lines'
-    )
-    
-    node_x = [np.cos(2*np.pi*i/len(nodes)) for i in range(len(nodes))]
-    node_y = [np.sin(2*np.pi*i/len(nodes)) for i in range(len(nodes))]
-    
-    nodes_trace = go.Scatter(
-        x=node_x, y=node_y,
-        mode='markers+text',
-        hoverinfo='text',
-        text=nodes,
-        textposition="top center",
-        marker=dict(
-            size=20,
-            color='#1f77b4',
-            line_width=2
-        )
-    )
-    
-    fig = go.Figure(data=[edges_trace, nodes_trace],
-                   layout=go.Layout(
-                       title=titulo,
-                       showlegend=False,
-                       hovermode='closest',
-                       margin=dict(b=20,l=5,r=5,t=40),
-                       xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                       yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)
-                   ))
-    
-    return fig
-
 def analisar_tendencia(df, jogador, coluna):
     ultimos_4 = df[df['Jogador'] == jogador][coluna].tail(4).mean()
     media_geral = df[df['Jogador'] == jogador][coluna].mean()
@@ -406,23 +339,6 @@ app.layout = dbc.Container([
         ])
     ], className='mb-4'),
     
-    # Redes de Entrosamento
-    dbc.Card([
-        dbc.CardBody([
-            html.H3('🤝 Redes de Entrosamento', className='card-title'),
-            dbc.Row([
-                dbc.Col([
-                    html.H5('⚽ Rede de Gols', className='text-center'),
-                    dcc.Graph(id='rede-gols')
-                ]),
-                dbc.Col([
-                    html.H5('👟 Rede de Assistências', className='text-center'),
-                    dcc.Graph(id='rede-assists')
-                ])
-            ])
-        ])
-    ], className='mb-4'),
-    
     # Análise Individual
     dbc.Card([
         dbc.CardBody([
@@ -449,9 +365,7 @@ app.layout = dbc.Container([
      Output('evolucao-assists', 'figure'),
      Output('heatmap-participacao', 'figure'),
      Output('jogadores-comparacao', 'options'),
-     Output('radar-plot', 'figure'),
-     Output('rede-gols', 'figure'),
-     Output('rede-assists', 'figure')],
+     Output('radar-plot', 'figure')],
     [Input('data-inicio', 'date'),
      Input('data-fim', 'date'),
      Input('jogadores-comparacao', 'value')]
@@ -501,10 +415,6 @@ def update_dashboard(data_inicio, data_fim, jogadores_selecionados):
     # Radar Plot
     radar_fig = criar_radar(df_filt, jogadores_selecionados if jogadores_selecionados else [])
     
-    # Redes de Entrosamento
-    rede_gols = criar_rede_entrosamento(df_filt, 'Gol', 'Rede de Entrosamento - Gols')
-    rede_assists = criar_rede_entrosamento(df_filt, 'Assistência', 'Rede de Entrosamento - Assistências')
-    
     return (
         total_jogos,
         total_gols,
@@ -515,9 +425,7 @@ def update_dashboard(data_inicio, data_fim, jogadores_selecionados):
         evolucao_assists,
         heatmap,
         jogadores_options,
-        radar_fig,
-        rede_gols,
-        rede_assists
+        radar_fig
     )
 
 @app.callback(
