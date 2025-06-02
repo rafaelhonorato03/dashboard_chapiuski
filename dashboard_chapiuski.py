@@ -14,13 +14,18 @@ import os
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 server = app.server
 
+# Configuração da porta para o Render
+port = int(os.environ.get("PORT", 8050))
+
 # URL dos dados
 dados_chap = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQqKawlrhvZxCUepOzcl4jG9ejActoqNd11Hs6hDverwxV0gv9PRYjwVxs6coMWsoopfH41EuSLRN-v/pub?output=csv"
 
 # --- FUNÇÕES AUXILIARES ---
 def carregar_dados():
     try:
+        print("Tentando carregar dados da URL:", dados_chap)
         df = pd.read_csv(dados_chap, decimal=',')
+        print("Dados carregados com sucesso. Shape:", df.shape)
         df['Gol'] = pd.to_numeric(df['Gol'], errors='coerce').fillna(0).astype(int)
         df['Assistência'] = pd.to_numeric(df['Assistência'], errors='coerce').fillna(0).astype(int)
         df['Data'] = pd.to_datetime(df['Data'], dayfirst=True)
@@ -28,9 +33,13 @@ def carregar_dados():
         primeira_data = df['Data'].min()
         df['Semana'] = ((df['Data'] - primeira_data).dt.days // 7) + 1
         df['Jogador'] = df['Jogador'].str.strip()
+        print("Processamento dos dados concluído com sucesso")
         return df
     except Exception as e:
         print(f"Erro ao carregar os dados: {str(e)}")
+        print("Tipo do erro:", type(e).__name__)
+        import traceback
+        print("Traceback completo:", traceback.format_exc())
         return None
 
 def criar_grafico_evolucao(df, jogadores, coluna, data_inicio, data_fim):
@@ -579,4 +588,4 @@ def update_analise_individual(jogador, data_inicio, data_fim):
     return metricas, momento_gols, momento_assists
 
 if __name__ == '__main__':
-    app.run_server()
+    app.run_server(host='0.0.0.0', port=port)
