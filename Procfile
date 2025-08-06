@@ -1,1 +1,1 @@
-web: gunicorn -c gunicorn_config.py dashboard_chapiuski:server 
+web: gunicorn -c config/gunicorn_config.py scripts.dashboard_chapiuski:server 

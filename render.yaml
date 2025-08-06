@@ -3,7 +3,7 @@ services:
     name: dashboard-chapiuski
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --bind 0.0.0.0:$PORT dashboard_chapiuski:server --workers 4 --threads 4
+    startCommand: gunicorn --bind 0.0.0.0:$PORT scripts.dashboard_chapiuski:server --workers 4 --threads 4
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.8
